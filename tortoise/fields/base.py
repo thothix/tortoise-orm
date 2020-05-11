@@ -135,7 +135,6 @@ class Field(metaclass=_FieldMeta):
         unique: bool = False,
         index: bool = False,
         description: Optional[str] = None,
-        model: "Optional[Model]" = None,
         **kwargs: Any,
     ) -> None:
         # TODO: Rename pk to primary_key, alias pk, deprecate
@@ -159,8 +158,7 @@ class Field(metaclass=_FieldMeta):
         self.model_field_name = ""
         self.description = description
         self.docstring: Optional[str] = None
-        # TODO: consider making this not be set from constructor
-        self.model: Type["Model"] = model  # type: ignore
+        self.model: Type["Model"] = None  # type: ignore
         self.reference: "Optional[Field]" = None
 
     def to_db_value(self, value: Any, instance: "Union[Type[Model], Model]") -> Any:

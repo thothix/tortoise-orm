@@ -302,9 +302,6 @@ class BaseTransactionWrapper:
     async def start(self) -> None:
         raise NotImplementedError()  # pragma: nocoverage
 
-    def release(self) -> None:
-        raise NotImplementedError()  # pragma: nocoverage
-
     async def rollback(self) -> None:
         raise NotImplementedError()  # pragma: nocoverage
 

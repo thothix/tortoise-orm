@@ -1,3 +1,4 @@
+# pylint: disable=C0123
 from typing import TYPE_CHECKING, Optional, Tuple, Type
 
 from pypika import Field
