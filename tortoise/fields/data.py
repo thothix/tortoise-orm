@@ -21,7 +21,6 @@ except ImportError:  # pragma: nocoverage
 
     parse_datetime = functools.partial(parse_date, default_timezone=None)
 
-
 if TYPE_CHECKING:  # pragma: nocoverage
     from tortoise.models import Model
 
@@ -79,7 +78,7 @@ class IntField(Field, int):
     @property
     def constraints(self) -> dict:
         return {
-            "ge": 1 if self.generated else -2147483648,
+            "ge": 1 if self.generated or self.reference else -2147483648,
             "le": 2147483647,
         }
 
@@ -116,7 +115,7 @@ class BigIntField(Field, int):
     @property
     def constraints(self) -> dict:
         return {
-            "ge": 1 if self.generated else -9223372036854775808,
+            "ge": 1 if self.generated or self.reference else -9223372036854775808,
             "le": 9223372036854775807,
         }
 
@@ -153,7 +152,7 @@ class SmallIntField(Field, int):
     @property
     def constraints(self) -> dict:
         return {
-            "ge": 1 if self.generated else -32768,
+            "ge": 1 if self.generated or self.reference else -32768,
             "le": 32767,
         }
 
@@ -217,10 +216,10 @@ class TextField(Field, str):  # type: ignore
             )
         if unique:
             raise ConfigurationError(
-                f"TextField doesn't support unique indexes, consider CharField or another strategy"
+                "TextField doesn't support unique indexes, consider CharField or another strategy"
             )
         if index:
-            raise ConfigurationError(f"TextField can't be indexed, consider CharField")
+            raise ConfigurationError("TextField can't be indexed, consider CharField")
 
         super().__init__(pk=pk, **kwargs)
 
@@ -321,14 +320,14 @@ class DatetimeField(Field, datetime.datetime):
     def to_db_value(
         self, value: Optional[datetime.datetime], instance: "Union[Type[Model], Model]"
     ) -> Optional[datetime.datetime]:
-        if hasattr(instance, "_saved_in_db"):
-            # Only do this if it is a Model instance, not class. Test for guaranteed instance var
-            if self.auto_now or (
-                self.auto_now_add and getattr(instance, self.model_field_name) is None
-            ):
-                value = datetime.datetime.utcnow()
-                setattr(instance, self.model_field_name, value)
-                return value
+        # Only do this if it is a Model instance, not class. Test for guaranteed instance var
+        if hasattr(instance, "_saved_in_db") and (
+            self.auto_now
+            or (self.auto_now_add and getattr(instance, self.model_field_name) is None)
+        ):
+            value = datetime.datetime.utcnow()
+            setattr(instance, self.model_field_name, value)
+            return value
         return value
 
     @property
@@ -455,9 +454,8 @@ class UUIDField(Field, UUID):
         SQL_TYPE = "UUID"
 
     def __init__(self, **kwargs: Any) -> None:
-        if kwargs.get("pk", False):
-            if "default" not in kwargs:
-                kwargs["default"] = uuid4
+        if kwargs.get("pk", False) and "default" not in kwargs:
+            kwargs["default"] = uuid4
         super().__init__(**kwargs)
 
     def to_db_value(self, value: Any, instance: "Union[Type[Model], Model]") -> Optional[str]:
@@ -511,9 +509,13 @@ class IntEnumFieldInstance(SmallIntField):
         return self.enum_type(value) if value is not None else None
 
     def to_db_value(
-        self, value: Union[IntEnum, None], instance: "Union[Type[Model], Model]"
+        self, value: Union[IntEnum, None, int], instance: "Union[Type[Model], Model]"
     ) -> Union[int, None]:
-        return int(value.value) if value is not None else None
+        if isinstance(value, IntEnum):
+            return int(value.value)
+        if isinstance(value, int):
+            return int(self.enum_type(value))
+        return value
 
 
 IntEnumType = TypeVar("IntEnumType", bound=IntEnum)
@@ -529,6 +531,8 @@ def IntEnumField(
 
     The description of the field is set automatically if not specified to a multiline list of
     "name: value" pairs.
+
+    **Note**: Valid int value of ``enum_type`` is acceptable.
 
     ``enum_type``:
         The enum class
@@ -566,9 +570,13 @@ class CharEnumFieldInstance(CharField):
         return self.enum_type(value) if value is not None else None
 
     def to_db_value(
-        self, value: Union[Enum, None], instance: "Union[Type[Model], Model]"
+        self, value: Union[Enum, None, str], instance: "Union[Type[Model], Model]"
     ) -> Union[str, None]:
-        return str(value.value) if value is not None else None
+        if isinstance(value, Enum):
+            return str(value.value)
+        if isinstance(value, str):
+            return str(self.enum_type(value).value)
+        return value
 
 
 CharEnumType = TypeVar("CharEnumType", bound=Enum)
@@ -588,6 +596,8 @@ def CharEnumField(
     **Warning**: If ``max_length`` is not specified or equals to zero, the size of represented
     char fields is automatically detected. So if later you update the enum, you need to update your
     table schema as well.
+
+    **Note**: Valid str value of ``enum_type`` is acceptable.
 
     ``enum_type``:
         The enum class

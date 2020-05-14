@@ -28,6 +28,8 @@ Contributors
 * Sang-Heon Jeon ``@lntuition``
 * Jong-Yeop Park ``@pjongy``
 * ``@sm0k``
+* Lev Gorodetskiy ``@droserasprout``
+* Hao Gong  ``@dongfangtianyu``
 
 Special Thanks
 ==============

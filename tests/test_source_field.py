@@ -8,6 +8,7 @@ from tests.testmodels import SourceFields, StraightFields
 from tortoise.contrib import test
 from tortoise.expressions import F
 from tortoise.functions import Coalesce, Count, Length, Lower, Trim, Upper
+from tortoise.query_utils import Q
 
 
 class StraightFieldTests(test.TestCase):
@@ -181,6 +182,25 @@ class StraightFieldTests(test.TestCase):
         obj2 = await self.model.get(eyedee=obj1.eyedee)
         self.assertEqual(obj2.chars, "aaa")
 
+    async def test_aggregation_with_filter(self):
+        obj1 = await self.model.create(chars="aaa")
+        await self.model.create(chars="bbb", fk=obj1)
+        await self.model.create(chars="ccc", fk=obj1)
+
+        obj = (
+            await self.model.filter(chars="aaa")
+            .annotate(
+                all=Count("fkrev", _filter=Q(chars="aaa")),
+                one=Count("fkrev", _filter=Q(fkrev__chars="bbb")),
+                no=Count("fkrev", _filter=Q(fkrev__chars="aaa")),
+            )
+            .first()
+        )
+
+        self.assertEqual(obj.all, 2)
+        self.assertEqual(obj.one, 1)
+        self.assertEqual(obj.no, 0)
+
     async def test_filter_by_aggregation_field_coalesce(self):
         await self.model.create(chars="aaa", nullable="null")
         await self.model.create(chars="bbb")
@@ -227,6 +247,13 @@ class StraightFieldTests(test.TestCase):
 
         self.assertEqual(len(obj), 1)
         self.assertEqual(obj[0].chars_upper, "AAA")
+
+    async def test_values_by_fk(self):
+        obj1 = await self.model.create(chars="aaa")
+        await self.model.create(chars="bbb", fk=obj1)
+
+        obj = await self.model.filter(chars="bbb").values("fk__chars")
+        self.assertEqual(obj, [{"fk__chars": "aaa"}])
 
 
 class SourceFieldTests(StraightFieldTests):

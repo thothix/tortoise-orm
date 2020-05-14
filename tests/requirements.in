@@ -10,6 +10,7 @@ pyodbc
 
 ## Administration tools
 pip-tools
+wheel
 
 ## Documentation tools
 -r ../docs/requirements.in
@@ -36,7 +37,7 @@ pytest-xdist
 pytest-cov
 
 # Pypi
-twine<2.0
+twine
 
 # Optional accelerators
 uvloop>=0.12.0; sys_platform != "win32" and implementation_name == "cpython"

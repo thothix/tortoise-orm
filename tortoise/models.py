@@ -1,14 +1,28 @@
+import asyncio
 import inspect
 import re
 from copy import copy, deepcopy
 from functools import partial
-from typing import Any, Awaitable, Dict, Generator, List, Optional, Set, Tuple, Type, TypeVar
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+)
 
 from pypika import Order, Query, Table
 
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.exceptions import (
     ConfigurationError,
+    DoesNotExist,
     IncompleteInstanceError,
     IntegrityError,
     OperationalError,
@@ -28,10 +42,13 @@ from tortoise.fields.relational import (
 )
 from tortoise.filters import get_filters_for_field
 from tortoise.functions import Function
-from tortoise.queryset import Q, QuerySet, QuerySetSingle
+from tortoise.queryset import ExistsQuery, Q, QuerySet, QuerySetSingle
+from tortoise.signals import Signals
 from tortoise.transactions import current_transaction_map, in_transaction
 
 MODEL = TypeVar("MODEL", bound="Model")
+
+
 # TODO: Define Filter type object. Possibly tuple?
 
 
@@ -122,16 +139,16 @@ def _get_comments(cls: "Type[Model]") -> Dict[str, str]:
         return {}
     comments = {}
 
-    for cls in reversed(cls.__mro__):
-        if cls is object:
+    for cls_ in reversed(cls.__mro__):
+        if cls_ is object:
             continue
-        matches = re.findall(rf"((?:(?!\n|^)[^\w\n]*#:.*?\n)+?)[^\w\n]*(\w+)\s*[:=]", source)
+        matches = re.findall(r"((?:(?!\n|^)[^\w\n]*#:.*?\n)+?)[^\w\n]*(\w+)\s*[:=]", source)
         for match in matches:
             field_name = match[1]
             # Extract text
             comment = re.sub(r"(^\s*#:\s*|\s*$)", "", match[0], flags=re.MULTILINE)
             # Class name template
-            comments[field_name] = comment.replace("{model}", cls.__name__)
+            comments[field_name] = comment.replace("{model}", cls_.__name__)
 
     return comments
 
@@ -245,7 +262,7 @@ class MetaInfo:
             raise ConfigurationError("No DB associated to model")
 
     @property
-    def ordering(self) -> Tuple[Tuple[str, str], ...]:
+    def ordering(self) -> Tuple[Tuple[str, Order], ...]:
         if not self._ordering_validated:
             unknown_fields = {f for f, _ in self._default_ordering} - self.fields
             raise ConfigurationError(
@@ -586,6 +603,9 @@ class ModelMeta(type):
         meta.finalise_fields()
         return new_class
 
+    def __getitem__(cls: Type[MODEL], key: Any) -> QuerySetSingle[MODEL]:  # type: ignore
+        return cls._getbypk(key)  # type: ignore
+
 
 class Model(metaclass=ModelMeta):
     """
@@ -594,6 +614,12 @@ class Model(metaclass=ModelMeta):
 
     # I don' like this here, but it makes auto completion and static analysis much happier
     _meta = MetaInfo(None)  # type: ignore
+    _listeners: Dict[Signals, Dict[Type[MODEL], List[Callable]]] = {  # type: ignore
+        Signals.pre_save: {},
+        Signals.post_save: {},
+        Signals.pre_delete: {},
+        Signals.post_delete: {},
+    }
 
     def __init__(self, **kwargs: Any) -> None:
         # self._meta is a very common attribute lookup, lets cache it.
@@ -601,6 +627,17 @@ class Model(metaclass=ModelMeta):
         self._partial = False
         self._saved_in_db = False
         self._custom_generated_pk = False
+
+        # Assign defaults for missing fields
+        for key in meta.fields.difference(self._set_kwargs(kwargs)):
+            field_object = meta.fields_map[key]
+            if callable(field_object.default):
+                setattr(self, key, field_object.default())
+            else:
+                setattr(self, key, field_object.default)
+
+    def _set_kwargs(self, kwargs: dict) -> Set[str]:
+        meta = self._meta
 
         # Assign values and do type conversions
         passed_fields = {*kwargs.keys()} | meta.fetch_fields
@@ -612,7 +649,7 @@ class Model(metaclass=ModelMeta):
                         f"You should first call .save() on {value} before referring to it"
                     )
                 setattr(self, key, value)
-                passed_fields.add(meta.fields_map[key].source_field)  # type: ignore
+                passed_fields.add(meta.fields_map[key].source_field)
             elif key in meta.fields_db_projection:
                 field_object = meta.fields_map[key]
                 if field_object.generated:
@@ -634,13 +671,7 @@ class Model(metaclass=ModelMeta):
                     "You can't set m2m relations through init, use m2m_manager instead"
                 )
 
-        # Assign defaults for missing fields
-        for key in meta.fields.difference(passed_fields):
-            field_object = meta.fields_map[key]
-            if callable(field_object.default):
-                setattr(self, key, field_object.default())
-            else:
-                setattr(self, key, field_object.default)
+        return passed_fields
 
     @classmethod
     def _init_from_db(cls: Type[MODEL], **kwargs: Any) -> MODEL:
@@ -701,6 +732,84 @@ class Model(metaclass=ModelMeta):
     Can be used as a field name when doing filtering e.g. ``.filter(pk=...)`` etc...
     """
 
+    @classmethod
+    async def _getbypk(cls: Type[MODEL], key: Any) -> MODEL:
+        try:
+            return await cls.get(pk=key)
+        except (DoesNotExist, ValueError):
+            raise KeyError(f"{cls._meta.full_name} has no object {repr(key)}")
+
+    def update_from_dict(self, data: dict) -> MODEL:
+        """
+        Updates the current model with the provided dict.
+        This can allow mass-updating a model from a dict, also ensuring that datatype conversions happen.
+
+        This will ignore any extra fields, and NOT update the model with them,
+        but will raise errors on bad types or updating Many-instance relations.
+
+        :param data: The parameters you want to update in a dict format
+        :return: The current model instance
+
+        :raises ConfigurationError: When attempting to update a remote instance
+            (e.g. a reverse ForeignKey or ManyToMany relation)
+        :raises ValueError: When a passed parameter is not type compatible
+        """
+        self._set_kwargs(data)
+        return self  # type: ignore
+
+    @classmethod
+    def register_listener(cls, signal: Signals, listener: Callable):
+        """
+        Register listener to current model class for special Signal.
+
+        :param signal: one of tortoise.signals.Signal
+        :param listener: callable listener
+
+        :raises ConfigurationError: When listener is not callable
+        """
+        if not callable(listener):
+            raise ConfigurationError("Signal listener must be callable!")
+        cls_listeners = cls._listeners.get(signal).setdefault(cls, [])  # type:ignore
+        if listener not in cls_listeners:
+            cls_listeners.append(listener)
+
+    async def _pre_delete(self, using_db: Optional[BaseDBAsyncClient] = None,) -> None:
+        listeners = []
+        cls_listeners = self._listeners.get(Signals.pre_delete, {}).get(self.__class__, [])
+        for listener in cls_listeners:
+            listeners.append(listener(self.__class__, self, using_db,))
+        await asyncio.gather(*listeners)
+
+    async def _post_delete(self, using_db: Optional[BaseDBAsyncClient] = None,) -> None:
+        listeners = []
+        cls_listeners = self._listeners.get(Signals.post_delete, {}).get(self.__class__, [])
+        for listener in cls_listeners:
+            listeners.append(listener(self.__class__, self, using_db,))
+        await asyncio.gather(*listeners)
+
+    async def _pre_save(
+        self,
+        using_db: Optional[BaseDBAsyncClient] = None,
+        update_fields: Optional[List[str]] = None,
+    ) -> None:
+        listeners = []
+        cls_listeners = self._listeners.get(Signals.pre_save, {}).get(self.__class__, [])
+        for listener in cls_listeners:
+            listeners.append(listener(self.__class__, self, using_db, update_fields))
+        await asyncio.gather(*listeners)
+
+    async def _post_save(
+        self,
+        using_db: Optional[BaseDBAsyncClient] = None,
+        created: bool = False,
+        update_fields: Optional[List[str]] = None,
+    ) -> None:
+        listeners = []
+        cls_listeners = self._listeners.get(Signals.post_save, {}).get(self.__class__, [])
+        for listener in cls_listeners:
+            listeners.append(listener(self.__class__, self, created, using_db, update_fields))
+        await asyncio.gather(*listeners)
+
     async def save(
         self,
         using_db: Optional[BaseDBAsyncClient] = None,
@@ -734,11 +843,15 @@ class Model(metaclass=ModelMeta):
                 raise IncompleteInstanceError(
                     f"{self.__class__.__name__} is a partial model, can only be saved with the relevant update_field provided"
                 )
+        await self._pre_save(using_db, update_fields)
         if self._saved_in_db:
             await executor.execute_update(self, update_fields)
+            created = False
         else:
             await executor.execute_insert(self)
+            created = True
             self._saved_in_db = True
+        await self._post_save(using_db, created, update_fields)
 
     async def delete(self, using_db: Optional[BaseDBAsyncClient] = None) -> None:
         """
@@ -751,7 +864,9 @@ class Model(metaclass=ModelMeta):
         db = using_db or self._meta.db
         if not self._saved_in_db:
             raise OperationalError("Can't delete unpersisted record")
+        await self._pre_delete(using_db)
         await db.executor_class(model=self.__class__, db=db).execute_delete(self)
+        await self._post_delete(using_db)
 
     async def fetch_related(self, *args: Any, using_db: Optional[BaseDBAsyncClient] = None) -> None:
         """
@@ -778,9 +893,9 @@ class Model(metaclass=ModelMeta):
         Fetches the object if exists (filtering on the provided parameters),
         else creates an instance with any unspecified parameters as default values.
 
-        :param defaults:
+        :param defaults: Default values to be added to a created instance if it can't be fetched.
         :param using_db: Specific DB connection to use instead of default bound
-        :param kwargs:
+        :param kwargs: Query parameters.
         """
         if not defaults:
             defaults = {}
@@ -813,12 +928,12 @@ class Model(metaclass=ModelMeta):
             user = User(name="...", email="...")
             await user.save()
 
-        :param kwargs:
+        :param kwargs: Model parameters.
         """
         instance = cls(**kwargs)
+        instance._saved_in_db = False
         db = kwargs.get("using_db") or cls._meta.db
-        await db.executor_class(model=cls, db=db).execute_insert(instance)
-        instance._saved_in_db = True
+        await instance.save(using_db=db)
         return instance
 
     @classmethod
@@ -863,8 +978,8 @@ class Model(metaclass=ModelMeta):
         """
         Generates a QuerySet with the filter applied.
 
-        :param args:
-        :param kwargs:
+        :param args: Q funtions containing constraints. Will be AND'ed.
+        :param kwargs: Simple filter constraints.
         """
         return QuerySet(cls).filter(*args, **kwargs)
 
@@ -873,8 +988,8 @@ class Model(metaclass=ModelMeta):
         """
         Generates a QuerySet with the exclude applied.
 
-        :param args:
-        :param kwargs:
+        :param args: Q funtions containing constraints. Will be AND'ed.
+        :param kwargs: Simple filter constraints.
         """
         return QuerySet(cls).exclude(*args, **kwargs)
 
@@ -883,7 +998,7 @@ class Model(metaclass=ModelMeta):
         """
         Annotates the result set with extra Functions/Aggregations.
 
-        :param kwargs:
+        :param kwargs: Parameter name and the Function/Aggregation to annotate with.
         """
         return QuerySet(cls).annotate(**kwargs)
 
@@ -903,13 +1018,27 @@ class Model(metaclass=ModelMeta):
 
             user = await User.get(username="foo")
 
-        :param args:
-        :param kwargs:
+        :param args: Q funtions containing constraints. Will be AND'ed.
+        :param kwargs: Simple filter constraints.
 
         :raises MultipleObjectsReturned: If provided search returned more than one object.
         :raises DoesNotExist: If object can not be found.
         """
         return QuerySet(cls).get(*args, **kwargs)
+
+    @classmethod
+    def exists(cls: Type[MODEL], *args: Q, **kwargs: Any) -> ExistsQuery:
+        """
+        Return True/False whether record exists with the provided filter parameters.
+
+        .. code-block:: python3
+
+            result = await User.exists(username="foo")
+
+        :param args: Q funtions containing constraints. Will be AND'ed.
+        :param kwargs: Simple filter constraints.
+        """
+        return QuerySet(cls).filter(*args, **kwargs).exists()
 
     @classmethod
     def get_or_none(cls: Type[MODEL], *args: Q, **kwargs: Any) -> QuerySetSingle[Optional[MODEL]]:
@@ -920,8 +1049,8 @@ class Model(metaclass=ModelMeta):
 
             user = await User.get(username="foo")
 
-        :param args:
-        :param kwargs:
+        :param args: Q funtions containing constraints. Will be AND'ed.
+        :param kwargs: Simple filter constraints.
         """
         return QuerySet(cls).get_or_none(*args, **kwargs)
 
@@ -932,9 +1061,9 @@ class Model(metaclass=ModelMeta):
         """
         Fetches related models for provided list of Model objects.
 
-        :param instance_list:
-        :param args:
-        :param using_db:
+        :param instance_list: List of Model objects to fetch relations for.
+        :param args: Relation names to fetch.
+        :param using_db: DO NOT USE
         """
         db = using_db or cls._meta.db
         await db.executor_class(model=cls, db=db).fetch_for_list(instance_list, *args)
@@ -1025,7 +1154,7 @@ class Model(metaclass=ModelMeta):
             "description": cls._meta.table_description or None,
             "docstring": inspect.cleandoc(cls.__doc__ or "") or None,
             "unique_together": cls._meta.unique_together or [],
-            "pk_field": cls._meta.pk.describe(serializable),
+            "pk_field": cls._meta.fields_map[cls._meta.pk_attr].describe(serializable),
             "data_fields": [
                 field.describe(serializable)
                 for name, field in cls._meta.fields_map.items()

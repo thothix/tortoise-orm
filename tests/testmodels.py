@@ -89,7 +89,18 @@ class Address(Model):
     street = fields.CharField(max_length=128)
 
     event: fields.OneToOneRelation[Event] = fields.OneToOneField(
-        "models.Event", on_delete=fields.CASCADE, related_name="address", null=True
+        "models.Event", on_delete=fields.CASCADE, related_name="address", pk=True
+    )
+
+
+class Dest_null(Model):
+    name = fields.CharField(max_length=64)
+
+
+class O2O_null(Model):
+    name = fields.CharField(max_length=64)
+    event: fields.OneToOneRelation[Event] = fields.OneToOneField(
+        "models.Dest_null", on_delete=fields.CASCADE, related_name="address_null", null=True
     )
 
 
@@ -649,3 +660,12 @@ class Principal(Model):
     school: fields.OneToOneRelation[School] = fields.OneToOneField(
         "models.School", on_delete=fields.CASCADE, related_name="principal", to_field="id"
     )
+
+
+class Signals(Model):
+    name = fields.CharField(max_length=255)
+
+
+class DefaultUpdate(Model):
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)

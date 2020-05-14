@@ -6,6 +6,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, cast
 
 from pypika import JoinType, Parameter, Query, Table
+from pypika.terms import ArithmeticExpression
 
 from tortoise.exceptions import OperationalError
 from tortoise.fields.base import Field
@@ -167,16 +168,34 @@ class BaseExecutor:
             await self.db.execute_insert(self.insert_query_all, values)
 
     async def execute_bulk_insert(self, instances: "List[Model]") -> None:
-        values_lists = [
-            [
-                self.column_map[field_name](getattr(instance, field_name), instance)
-                for field_name in self.regular_columns
-            ]
-            for instance in instances
-        ]
-        await self.db.execute_many(self.insert_query, values_lists)
+        values_lists_all = []
+        values_lists = []
+        for instance in instances:
+            if instance._custom_generated_pk:
+                values_lists_all.append(
+                    [
+                        self.column_map[field_name](getattr(instance, field_name), instance)
+                        for field_name in self.regular_columns_all
+                    ]
+                )
+            else:
+                values_lists.append(
+                    [
+                        self.column_map[field_name](getattr(instance, field_name), instance)
+                        for field_name in self.regular_columns
+                    ]
+                )
 
-    def get_update_sql(self, update_fields: Optional[List[str]]) -> str:
+        if values_lists_all:
+            await self.db.execute_many(self.insert_query_all, values_lists_all)
+        if values_lists:
+            await self.db.execute_many(self.insert_query, values_lists)
+
+    def get_update_sql(
+        self,
+        update_fields: Optional[List[str]],
+        arithmetic: Optional[Dict[str, ArithmeticExpression]],
+    ) -> str:
         """
         Generates the SQL for updating a model depending on provided update_fields.
         Result is cached for performance.
@@ -184,7 +203,7 @@ class BaseExecutor:
         key = ",".join(update_fields) if update_fields else ""
         if key in self.update_cache:
             return self.update_cache[key]
-
+        arithmetic = arithmetic or {}
         table = self.model._meta.basetable
         query = self.db.query_class.update(table)
         count = 0
@@ -192,8 +211,11 @@ class BaseExecutor:
             db_column = self.model._meta.fields_db_projection[field]
             field_object = self.model._meta.fields_map[field]
             if not field_object.pk:
-                query = query.set(db_column, self.parameter(count))
-                count += 1
+                if db_column not in arithmetic.keys():
+                    query = query.set(db_column, self.parameter(count))
+                    count += 1
+                else:
+                    query = query.set(db_column, arithmetic.get(db_column))
 
         query = query.where(table[self.model._meta.db_pk_column] == self.parameter(count))
 
@@ -203,13 +225,20 @@ class BaseExecutor:
     async def execute_update(
         self, instance: "Union[Type[Model], Model]", update_fields: Optional[List[str]]
     ) -> int:
-        values = [
-            self.column_map[field](getattr(instance, field), instance)
-            for field in update_fields or self.model._meta.fields_db_projection.keys()
-            if not self.model._meta.fields_map[field].pk
-        ]
+        values = []
+        arithmetic = {}
+        for field in update_fields or self.model._meta.fields_db_projection.keys():
+            if not self.model._meta.fields_map[field].pk:
+                instance_field = getattr(instance, field)
+                if isinstance(instance_field, ArithmeticExpression):
+                    arithmetic[field] = instance_field
+                else:
+                    value = self.column_map[field](instance_field, instance)
+                    values.append(value)
         values.append(self.model._meta.pk.to_db_value(instance.pk, instance))
-        return (await self.db.execute_query(self.get_update_sql(update_fields), values))[0]
+        return (
+            await self.db.execute_query(self.get_update_sql(update_fields, arithmetic), values)
+        )[0]
 
     async def execute_delete(self, instance: "Union[Type[Model], Model]") -> int:
         return (
@@ -382,6 +411,8 @@ class BaseExecutor:
     async def _prefetch_direct_relation(
         self, instance_list: "List[Model]", field: str, related_query: "QuerySet"
     ) -> "List[Model]":
+        # TODO: This will only work if instance_list is all of same type
+        # TODO: If that's the case, then we can optimize the key resolver
         related_objects_for_fetch: Dict[str, list] = {}
         relation_key_field = f"{field}_id"
         for instance in instance_list:

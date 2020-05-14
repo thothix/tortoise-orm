@@ -9,8 +9,64 @@ Changelog
 
 0.16
 ====
+0.16.12
+-------
+- Make ``Field.default`` effect on db level when generate table
+
+0.16.11
+-------
+- fix: ``sqlite://:memory:`` in Windows thrown ``OSError: [WinError 123]``
+- Support ``bulk_create()`` insertion of records with overridden primary key when the primary key is DB-generated
+- Add ``queryset.exists()`` and ``Model.exists()``.
+- Add model subscription lookup, ``Model[<pkval>]`` that will return the object or raise ``KeyError``
+
+0.16.10
+-------
+- Fix bad import of ``basestring``
+- Better handling of NULL characters in strings. Fixes SQLite, raises better error for PostgreSQL.
+- Support ``.group_by()`` with join now
+
+0.16.9
+------
+- Support ``F`` expression in ``.save()`` now
+- ``IntEnumField`` accept valid int value and ``CharEnumField`` accept valid str value
+- Pydantic models get created with globally unique identifier
+- Leaf-detection to minimize duplicate Pydantic model creation
+- Pydantic models with a Primary Key that is also a raw field of a relation is now not hidden when ``exclude_raw_fields=True`` as it is a critically important field
+- Raise an informative error when a field is set as nullable and primary key at the same time
+- Foreign key id's are now described to have the positive-integer range of the field it is related to
+- Fixed prefetching over OneToOne relations
+- Fixed ``__contains`` for non-text fields (e.g. ``JSONB``)
+
+0.16.8
+------
+- Allow ``Q`` expression to function with ``_filter`` parameter on aggregations
+- Add manual ``.group_by()`` support
+- Fixed regression where ``GROUP BY`` class is missing for an aggregate with a specified order.
+
+0.16.7
+------
+- Added preliminary support for Python 3.9
+- ``TruncationTestCase`` now properly quotes table names when it clears them out.
+- Add model signals support
+- Added ``app_label`` to ``test initializer(...)`` and ``TORTOISE_TEST_APP`` as test environment variable.
+
 0.16.6
 ------
+.. warning::
+
+    This is a security fix release. We recommend everyone update.
+
+Security fixes
+^^^^^^^^^^^^^^
+
+- Fixed SQL injection issue in MySQL
+- Fixed SQL injection issues in MySQL when using ``contains``, ``starts_with`` or ``ends_with`` filters (and their case-insensitive counterparts)
+- Fixed malformed SQL for PostgreSQL and SQLite when using ``contains``, ``starts_with`` or ``ends_with`` filters (and their case-insensitive counterparts)
+
+Other changes
+^^^^^^^^^^^^^
+
 * Added support for partial models:
 
   To create a partial model, one can do a ``.only(<fieldnames-as-strings>)`` as part of the QuerySet.
@@ -19,7 +75,7 @@ Changelog
   Persisting changes on the model is allowed only when:
 
   * All the fields you want to update is specified in ``<model>.save(update_fields=[...])``
-  * You included the Model primary key in the `.only(...)``
+  * You included the Model primary key in the ``.only(...)``
 
   To protect against common mistakes we ensure that errors get raised:
 
@@ -29,6 +85,10 @@ Changelog
     then ``IncompleteInstanceError`` will be raised indicating that updates can't be done without the primary key being known.
   * If you do a ``<model>.save(update_fields=[...])`` and one of the fields in ``update_fields`` was not in the ``.only(...)``,
     then ``IncompleteInstanceError`` as that field is not available to be updated.
+
+- Fixed bad SQL generation when doing a ``.values()`` query over a Foreign Key
+- Added `<model>.update_from_dict({...})` that will mass update values safely from a dictionary
+- Fixed processing URL encoded password in connection string
 
 0.16.5
 ------
@@ -189,6 +249,34 @@ Removals:
 
 0.15
 ====
+
+0.15.24
+-------
+- Fixed regression where ``GROUP BY`` class is missing for an aggregate with a specified order.
+
+0.15.23
+-------
+- Fixed SQL injection issue in MySQL
+- Fixed SQL injection issues in MySQL when using ``contains``, ``starts_with`` or ``ends_with`` filters (and their case-insensitive counterparts)
+- Fixed malformed SQL for PostgreSQL and SQLite when using ``contains``, ``starts_with`` or ``ends_with`` filters (and their case-insensitive counterparts)
+
+0.15.22
+-------
+* Fix the aggregates using the wrong side of the join when doing a self-referential aggregation.
+* Fix for ``generate_schemas`` param being ignored in ``tortoise.contrib.quart.register_tortoise``
+
+0.15.21
+-------
+* Fixed invalid ``var IN ()`` SQL generated using ``__in=`` and ``__not_in`` filters.
+* Fix bug with order_by on nested fields
+* Fix joining with self by reverse-foreign-key for filtering and annotation
+
+0.15.20
+-------
+* Default ``values()`` & ``values_list()`` now includes annotations.
+* Annotations over joins now work correctly with ``values()`` & ``values_list()``
+* Ensure ``GROUP BY`` precedes ``HAVING`` to ensure that filtering by aggregates work correctly.
+* Cast ``BooleanField`` values correctly on SQLite & MySQL
 
 0.15.19
 -------

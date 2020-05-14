@@ -1,6 +1,15 @@
 from uuid import uuid4
 
-from tests.testmodels import Address, Event, NoID, Team, Tournament, UUIDFkRelatedNullModel
+from tests.testmodels import (
+    Dest_null,
+    Event,
+    IntFields,
+    NoID,
+    O2O_null,
+    Team,
+    Tournament,
+    UUIDFkRelatedNullModel,
+)
 from tortoise.contrib import test
 from tortoise.exceptions import (
     ConfigurationError,
@@ -9,6 +18,7 @@ from tortoise.exceptions import (
     MultipleObjectsReturned,
     OperationalError,
 )
+from tortoise.expressions import F
 from tortoise.models import NoneAwaitable
 
 
@@ -60,6 +70,13 @@ class TestModelMethods(test.TestCase):
         oldid = self.mdl.id
         await self.mdl.save()
         self.assertEqual(self.mdl.id, oldid)
+
+    async def test_save_f_expression(self):
+        int_field = await IntFields.create(intnum=1)
+        int_field.intnum = F("intnum") + 1
+        await int_field.save(update_fields=["intnum"])
+        n_int = await IntFields.get(pk=int_field.pk)
+        self.assertEqual(n_int.intnum, 2)
 
     async def test_save_full(self):
         self.mdl.name = "TestS"
@@ -148,6 +165,14 @@ class TestModelMethods(test.TestCase):
         with self.assertRaises(MultipleObjectsReturned):
             await self.cls.get(name="Test")
 
+    async def test_exists(self):
+        await self.cls.create(name="Test")
+        ret = await self.cls.exists(name="Test")
+        self.assertTrue(ret)
+
+        ret = await self.cls.exists(name="XXX")
+        self.assertFalse(ret)
+
     async def test_get_or_none(self):
         mdl = await self.cls.get_or_none(name="Test")
         self.assertEqual(self.mdl.id, mdl.id)
@@ -159,6 +184,39 @@ class TestModelMethods(test.TestCase):
 
         with self.assertRaises(MultipleObjectsReturned):
             await self.cls.get_or_none(name="Test")
+
+    async def test_update_from_dict(self):
+        evt1 = await Event.create(name="a", tournament=await Tournament.create(name="a"))
+        orig_modified = evt1.modified
+        await evt1.update_from_dict({"alias": "8", "name": "b", "bad_name": "foo"}).save()
+        self.assertEqual(evt1.alias, 8)
+        self.assertEqual(evt1.name, "b")
+
+        with self.assertRaises(AttributeError):
+            _ = evt1.bad_name
+
+        evt2 = await Event.get(name="b")
+        self.assertEqual(evt1.pk, evt2.pk)
+        self.assertEqual(evt1.modified, evt2.modified)
+        self.assertNotEqual(orig_modified, evt1.modified)
+
+        with self.assertRaises(ConfigurationError):
+            evt2.update_from_dict({"participants": []})
+
+        with self.assertRaises(ValueError):
+            evt2.update_from_dict({"alias": "foo"})
+
+    async def test_index_access(self):
+        obj = await self.cls[self.mdl.pk]
+        self.assertEqual(obj, self.mdl)
+
+    async def test_index_badval(self):
+        with self.assertRaises(KeyError):
+            await self.cls[100000]
+
+    async def test_index_badtype(self):
+        with self.assertRaises(KeyError):
+            await self.cls["asdf"]
 
 
 class TestModelMethodsNoID(TestModelMethods):
@@ -205,15 +263,15 @@ class TestModelConstructor(test.TestCase):
             "You can't set backward one to one relations through init, "
             "change related model instead",
         ):
-            address = await Address.create(city="Santa Monica", street="Ocean")
-            await Event(name="a", address=address)
+            address = await O2O_null.create(name="Ocean")
+            await Dest_null(name="a", address_null=address)
 
     def test_fk_unsaved(self):
         with self.assertRaisesRegex(OperationalError, "You should first call .save()"):
             Event(name="a", tournament=Tournament(name="a"))
 
     async def test_fk_saved(self):
-        Event(name="a", tournament=await Tournament.create(name="a"))
+        await Event.create(name="a", tournament=await Tournament.create(name="a"))
 
     async def test_noneawaitable(self):
         self.assertFalse(NoneAwaitable)

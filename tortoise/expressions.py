@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Type, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Type
 
 from pypika import Field
-from pypika.terms import ArithmeticExpression
+from pypika.terms import ArithmeticExpression, Term
 
 from tortoise.exceptions import FieldError
 
@@ -12,10 +12,8 @@ if TYPE_CHECKING:  # pragma: nocoverage
 class F(Field):  # type: ignore
     @classmethod
     def resolver_arithmetic_expression(
-        cls,
-        model: "Type[Model]",
-        arithmetic_expression_or_field: Union[ArithmeticExpression, Field],
-    ) -> Tuple[Union[ArithmeticExpression, Field], Optional[Field]]:
+        cls, model: "Type[Model]", arithmetic_expression_or_field: Term,
+    ) -> Tuple[Term, Optional[Field]]:
         field_object = None
 
         if isinstance(arithmetic_expression_or_field, Field):
@@ -46,8 +44,7 @@ class F(Field):  # type: ignore
                     raise FieldError(
                         "Cannot use arithmetic expression between different field type"
                     )
-                else:
-                    field_object = left_field_object
+                field_object = left_field_object
 
             (
                 arithmetic_expression_or_field.right,
@@ -58,7 +55,6 @@ class F(Field):  # type: ignore
                     raise FieldError(
                         "Cannot use arithmetic expression between different field type"
                     )
-                else:
-                    field_object = right_field_object
+                field_object = right_field_object
 
         return arithmetic_expression_or_field, field_object

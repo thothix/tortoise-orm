@@ -22,7 +22,7 @@ from typing import (
 from pypika import JoinType, Order, Table
 from pypika.functions import Count
 from pypika.queries import QueryBuilder
-from pypika.terms import Term
+from pypika.terms import Term, ValueWrapper
 from typing_extensions import Protocol
 
 from tortoise.backends.base.client import BaseDBAsyncClient, Capabilities
@@ -101,7 +101,7 @@ class AwaitableQuery(Generic[MODEL]):
         :param model: The Model this querysit is based on.
         :param q_objects: The Q expressions to apply.
         :param annotations: Extra annotations to add.
-        :param custom_filters:
+        :param custom_filters: Pre-resolved filters to be passed though.
         """
         has_aggregate = self._resolve_annotate()
 
@@ -118,7 +118,7 @@ class AwaitableQuery(Generic[MODEL]):
         self.query._wheres = where_criterion
         self.query._havings = having_criterion
 
-        if has_aggregate and (self._joined_tables or having_criterion):
+        if has_aggregate and (self._joined_tables or having_criterion or self.query._orderbys):
             self.query = self.query.groupby(
                 self.model._meta.basetable[self.model._meta.db_pk_column]
             )
@@ -242,6 +242,7 @@ class QuerySet(AwaitableQuery[MODEL]):
         "_distinct",
         "_having",
         "_custom_filters",
+        "_group_bys",
     )
 
     def __init__(self, model: Type[MODEL]) -> None:
@@ -260,6 +261,7 @@ class QuerySet(AwaitableQuery[MODEL]):
         self._having: Dict[str, Any] = {}
         self._custom_filters: Dict[str, dict] = {}
         self._fields_for_select: Tuple[str, ...] = ()
+        self._group_bys: Tuple[str, ...] = ()
 
     def _clone(self) -> "QuerySet[MODEL]":
         queryset = QuerySet.__new__(QuerySet)
@@ -283,6 +285,7 @@ class QuerySet(AwaitableQuery[MODEL]):
         queryset._annotations = copy(self._annotations)
         queryset._having = copy(self._having)
         queryset._custom_filters = copy(self._custom_filters)
+        queryset._group_bys = copy(self._group_bys)
         return queryset
 
     def _filter_or_exclude(self, *args: Q, negate: bool, **kwargs: Any) -> "QuerySet[MODEL]":
@@ -402,6 +405,16 @@ class QuerySet(AwaitableQuery[MODEL]):
             queryset._custom_filters.update(get_filters_for_field(key, None, key))
         return queryset
 
+    def group_by(self, *fields: str) -> "QuerySet[MODEL]":
+        """
+        Make QuerySet returns list of dict or tuple with group by.
+
+        Must call before .values() or .values_list()
+        """
+        queryset = self._clone()
+        queryset._group_bys = fields
+        return queryset
+
     def values_list(self, *fields_: str, flat: bool = False) -> "ValuesListQuery":
         """
         Make QuerySet returns list of tuples for given args instead of objects.
@@ -429,6 +442,7 @@ class QuerySet(AwaitableQuery[MODEL]):
             orderings=self._orderings,
             annotations=self._annotations,
             custom_filters=self._custom_filters,
+            group_bys=self._group_bys,
         )
 
     def values(self, *args: str, **kwargs: str) -> "ValuesQuery":
@@ -472,6 +486,7 @@ class QuerySet(AwaitableQuery[MODEL]):
             orderings=self._orderings,
             annotations=self._annotations,
             custom_filters=self._custom_filters,
+            group_bys=self._group_bys,
         )
 
     def delete(self) -> "DeleteQuery":
@@ -519,6 +534,18 @@ class QuerySet(AwaitableQuery[MODEL]):
             custom_filters=self._custom_filters,
             limit=self._limit,
             offset=self._offset,
+        )
+
+    def exists(self) -> "ExistsQuery":
+        """
+        Return True/False whether queryset exists.
+        """
+        return ExistsQuery(
+            db=self._db,
+            model=self.model,
+            q_objects=self._q_objects,
+            annotations=self._annotations,
+            custom_filters=self._custom_filters,
         )
 
     def all(self) -> "QuerySet[MODEL]":
@@ -649,6 +676,9 @@ class QuerySet(AwaitableQuery[MODEL]):
             self.query = copy(self.model._meta.basequery).select(*db_fields_for_select)
         else:
             self.query = copy(self.model._meta.basequery_all_fields)
+        self.resolve_ordering(
+            self.model, self.model._meta.basetable, self._orderings, self._annotations
+        )
         self.resolve_filters(
             model=self.model,
             q_objects=self._q_objects,
@@ -661,9 +691,6 @@ class QuerySet(AwaitableQuery[MODEL]):
             self.query._offset = self._offset
         if self._distinct:
             self.query._distinct = True
-        self.resolve_ordering(
-            self.model, self.model._meta.basetable, self._orderings, self._annotations
-        )
 
     def __await__(self) -> Generator[Any, None, List[MODEL]]:
         if self._db is None:
@@ -795,6 +822,45 @@ class DeleteQuery(AwaitableQuery):
 
     async def _execute(self) -> int:
         return (await self._db.execute_query(str(self.query)))[0]
+
+
+class ExistsQuery(AwaitableQuery):
+    __slots__ = ("q_objects", "annotations", "custom_filters")
+
+    def __init__(
+        self,
+        model: Type[MODEL],
+        db: BaseDBAsyncClient,
+        q_objects: List[Q],
+        annotations: Dict[str, Any],
+        custom_filters: Dict[str, Dict[str, Any]],
+    ) -> None:
+        super().__init__(model)
+        self.q_objects = q_objects
+        self.annotations = annotations
+        self.custom_filters = custom_filters
+        self._db = db
+
+    def _make_query(self) -> None:
+        self.query = copy(self.model._meta.basequery)
+        self.resolve_filters(
+            model=self.model,
+            q_objects=self.q_objects,
+            annotations=self.annotations,
+            custom_filters=self.custom_filters,
+        )
+        self.query._limit = 1
+        self.query._select_other(ValueWrapper(1))
+
+    def __await__(self) -> Generator[Any, None, int]:
+        if self._db is None:
+            self._db = self.model._meta.db  # type: ignore
+        self._make_query()
+        return self._execute().__await__()
+
+    async def _execute(self) -> bool:
+        result, _ = await self._db.execute_query(str(self.query))
+        return bool(result)
 
 
 class CountQuery(AwaitableQuery):
@@ -933,6 +999,20 @@ class FieldSelectQuery(AwaitableQuery):
 
         raise FieldError(f'Unknown field "{field}" for model "{model}"')
 
+    def _resolve_group_bys(self, *field_names: str):
+        group_bys = []
+        for field_name in field_names:
+            field_split = field_name.split("__")
+            related_table, related_db_field = self._join_table_with_forwarded_fields(
+                model=self.model,
+                table=self.model._meta.basetable,
+                field=field_split[0],
+                forwarded_fields="__".join(field_split[1:]) if len(field_split) > 1 else "",
+            )
+            field = related_table[related_db_field].as_(field_name)
+            group_bys.append(field)
+        return group_bys
+
 
 class ValuesListQuery(FieldSelectQuery):
     __slots__ = (
@@ -946,6 +1026,7 @@ class ValuesListQuery(FieldSelectQuery):
         "custom_filters",
         "q_objects",
         "fields_for_select_list",
+        "group_bys",
     )
 
     def __init__(
@@ -961,6 +1042,7 @@ class ValuesListQuery(FieldSelectQuery):
         flat: bool,
         annotations: Dict[str, Any],
         custom_filters: Dict[str, Dict[str, Any]],
+        group_bys: Tuple[str, ...],
     ) -> None:
         super().__init__(model, annotations)
         if flat and (len(fields_for_select_list) != 1):
@@ -977,12 +1059,16 @@ class ValuesListQuery(FieldSelectQuery):
         self.fields_for_select_list = fields_for_select_list
         self.flat = flat
         self._db = db
+        self.group_bys = group_bys
 
     def _make_query(self) -> None:
         self.query = copy(self.model._meta.basequery)
         for positional_number, field in self.fields.items():
             self.add_field_to_select_query(field, positional_number)
 
+        self.resolve_ordering(
+            self.model, self.model._meta.basetable, self.orderings, self.annotations
+        )
         self.resolve_filters(
             model=self.model,
             q_objects=self.q_objects,
@@ -995,9 +1081,8 @@ class ValuesListQuery(FieldSelectQuery):
             self.query._offset = self.offset
         if self.distinct:
             self.query._distinct = True
-        self.resolve_ordering(
-            self.model, self.model._meta.basetable, self.orderings, self.annotations
-        )
+        if self.group_bys:
+            self.query._groupbys = self._resolve_group_bys(*self.group_bys)
 
     def __await__(self) -> Generator[Any, None, List[Any]]:
         if self._db is None:
@@ -1034,6 +1119,7 @@ class ValuesQuery(FieldSelectQuery):
         "annotations",
         "custom_filters",
         "q_objects",
+        "group_bys",
     )
 
     def __init__(
@@ -1048,6 +1134,7 @@ class ValuesQuery(FieldSelectQuery):
         orderings: List[Tuple[str, str]],
         annotations: Dict[str, Any],
         custom_filters: Dict[str, Dict[str, Any]],
+        group_bys: Tuple[str, ...],
     ) -> None:
         super().__init__(model, annotations)
         self.fields_for_select = fields_for_select
@@ -1058,12 +1145,16 @@ class ValuesQuery(FieldSelectQuery):
         self.custom_filters = custom_filters
         self.q_objects = q_objects
         self._db = db
+        self.group_bys = group_bys
 
     def _make_query(self) -> None:
         self.query = copy(self.model._meta.basequery)
         for return_as, field in self.fields_for_select.items():
             self.add_field_to_select_query(field, return_as)
 
+        self.resolve_ordering(
+            self.model, self.model._meta.basetable, self.orderings, self.annotations
+        )
         self.resolve_filters(
             model=self.model,
             q_objects=self.q_objects,
@@ -1076,9 +1167,8 @@ class ValuesQuery(FieldSelectQuery):
             self.query._offset = self.offset
         if self.distinct:
             self.query._distinct = True
-        self.resolve_ordering(
-            self.model, self.model._meta.basetable, self.orderings, self.annotations
-        )
+        if self.group_bys:
+            self.query._groupbys = self._resolve_group_bys(*self.group_bys)
 
     def __await__(self) -> Generator[Any, None, List[dict]]:
         if self._db is None:
