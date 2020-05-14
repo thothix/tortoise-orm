@@ -3,6 +3,7 @@
 ## Database Drivers
 asyncpg
 aiomysql
+aioodbc
 
 # Dev Tools
 
