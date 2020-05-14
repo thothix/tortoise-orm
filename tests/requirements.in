@@ -4,6 +4,7 @@
 asyncpg
 aiomysql
 aioodbc
+pyodbc
 
 # Dev Tools
 

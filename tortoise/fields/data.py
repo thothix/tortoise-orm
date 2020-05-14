@@ -370,7 +370,7 @@ class TimeDeltaField(Field, datetime.timedelta):
     ) -> Optional[int]:
         if value is None:
             return None
-        return str((value.days * 86400000000) + (value.seconds * 1000000) + value.microseconds)
+        return (value.days * 86400000000) + (value.seconds * 1000000) + value.microseconds
 
     class _db_oracle:
         SQL_TYPE = "NUMERIC"
