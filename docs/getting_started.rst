@@ -14,21 +14,20 @@ First you have to install tortoise like this:
 
 ..
 
-Then you should install your db driver
+Then you should install an extra db driver depending on your DB you want to use:
 
-.. code-block:: bash
-
-    pip install asyncpg
+* SQLite
+* PostgreSQL >= 9.4 (``pip install asyncpg``)
+* MySQL/MariaDB (``pip install aiomysql``)
+* Oracle (``pip install aioodbc``)
 
 ..
 
-Apart from ``asyncpg`` there is also support for ``sqlite`` through ``aiosqlite`` and
-``mysql`` through ``aiomysql``.
 You can easily implement more backends if there is appropriate ``asyncio`` driver for this db.
 
 Optional Accelerators
 ---------------------
-The following libraries can be used as accelerators:
+The following libraries can be used as accelerators, and if installed will be automatically used:
 
 * `python-rapidjson <https://pypi.org/project/python-rapidjson/>`_: Automatically used if installed for JSON SerDes.
 * `uvloop <https://pypi.org/project/uvloop/>`_: Shown to improve performance, but needs to be set up.
@@ -36,6 +35,13 @@ The following libraries can be used as accelerators:
   If you use a framework, it may already use it.
 * `ciso8601 <https://pypi.org/project/ciso8601/>`_: Automatically used if installed.
   Not automatically installed on Windows due to often a lack of a C compiler. Default on Linux/CPython.
+
+To install compatible ones, you can specify ``accel`` as an install parameter, like so:
+
+.. code-block:: bash
+
+    pip install tortoise-orm[accel]
+
 
 Tutorial
 ========

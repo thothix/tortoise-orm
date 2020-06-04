@@ -62,6 +62,9 @@ test_mysql_myisam:
 test_mysql:
 	$(py_warn) TORTOISE_TEST_DB="mysql://root:$(TORTOISE_MYSQL_PASS)@127.0.0.1:3306/test_\{\}" py.test --cov-append --cov-report=
 
+test_oracle:
+	$(py_warn) TORTOISE_TEST_DB="mysql://oracle:$(TORTOISE_ORACLE_PASS)@127.0.0.1:1521/test_\{\}" py.test -n 0
+
 _testall: test_sqlite test_postgres test_mysql_myisam test_mysql
 
 testall: deps _testall

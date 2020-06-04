@@ -9,8 +9,8 @@ Tortoise currently supports the following databases:
 * SQLite
 * PostgreSQL >= 9.4 (using ``asyncpg``)
 * MySQL/MariaDB (using ``aiomysql``)
+* Oracle (using ``aioodbc``)
 
-To use, please ensure that ``asyncpg`` and/or ``aiomysql`` is installed.
 
 .. _db_url:
 
@@ -164,6 +164,42 @@ MySQL optional parameters are pass-though parameters to the driver, see `here <h
     Sets the character set in use
 ``ssl`` (defaults to ''False``):
     Either ``True`` or a custom SSL context for self-signed certificates. See :ref:`db_ssl` for more info.
+
+
+Oracle
+======
+
+.. caution::
+
+    Tortoise has experimental support for Oracle running over ODBC. It is not yet complete or production ready.
+
+Guide for setting up ODBC for Oracle: https://github.com/mkleehammer/pyodbc/wiki/Connecting-to-Oracle-from-RHEL-or-Centos
+
+DB URL is typically in the form of :samp:`mysql://myuser:mypass:pass@db.host:3306/somedb`
+
+Required Parameters
+-------------------
+
+``user``:
+    Username to connect with.
+``password``:
+    Password for username.
+``host``:
+    Network host that database is available at.
+``port``:
+    Network port that database is available at. (defaults to ``3306``)
+``database``:
+    Database to use.
+
+Optional parameters:
+--------------------
+
+``minsize`` (defaults to ``1``):
+    Minimum connection pool size
+``maxsize`` (defaults to ``5``):
+    Maximum connection pool size
+
+More to be determined.
 
 .. _db_ssl:
 
