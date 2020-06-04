@@ -324,7 +324,7 @@ def pydantic_model_creator(
                 if fdesc.get("nullable"):
                     fconfig["nullable"] = True
                 if fdesc.get("nullable") or fdesc.get("default"):
-                    model = Optional[model]
+                    model = Optional[model]  # type: ignore
 
                 pannotations[fname] = model
 
@@ -344,7 +344,9 @@ def pydantic_model_creator(
             comment = _cleandoc(func)
             if annotation is not None:
                 pannotations[fname] = annotation
-
+        # Json fields
+        elif field_type is fields.JSONField:
+            pannotations[fname] = Any  # type: ignore
         # Any other tortoise fields
         else:
             annotation = annotations.get(fname, None)

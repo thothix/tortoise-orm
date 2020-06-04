@@ -1,4 +1,5 @@
 -e ..
+-r ../requirements-accel.txt
 
 ## Database Drivers
 asyncpg
@@ -31,18 +32,13 @@ tox
 asynctest
 green
 coveralls
-pytest<5.4
+pytest<5.4 # Has annoying deprecation warning of itself?  >5.2, !=5.4.0, !=5.4.1
 nose2
 pytest-xdist
 pytest-cov
 
 # Pypi
 twine
-
-# Optional accelerators
-uvloop>=0.12.0; sys_platform != "win32" and implementation_name == "cpython"
-python-rapidjson; implementation_name == "cpython"
-iso8601
 
 # Sample integration - Quart
 quart
