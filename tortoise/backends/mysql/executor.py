@@ -1,5 +1,8 @@
+import enum
+
 from pypika_tortoise import functions
 from pypika_tortoise.enums import SqlTypes
+from pypika_tortoise.functions import Cast, Coalesce
 from pypika_tortoise.terms import BasicCriterion, Criterion
 from pypika_tortoise.utils import format_quotes
 
@@ -29,6 +32,10 @@ from tortoise.filters import (
     search,
     starts_with,
 )
+
+
+class MySQLRegexpComparators(enum.Enum):
+    REGEXP = " REGEXP "
 
 
 class StrWrapper(ValueWrapper):
@@ -97,7 +104,9 @@ def mysql_search(field: Term, value: str) -> SearchCriterion:
 
 
 def mysql_posix_regex(field: Term, value: str) -> BasicCriterion:
-    return BasicCriterion(" REGEXP ", field, StrWrapper(value))  # type:ignore[arg-type]
+    return BasicCriterion(
+        MySQLRegexpComparators.REGEXP, Coalesce(Cast(field, SqlTypes.CHAR)), StrWrapper(value)
+    )
 
 
 class MySQLExecutor(BaseExecutor):
