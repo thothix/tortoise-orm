@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import importlib.metadata as importlib_metadata
 import json
+import logging
 import os
 import warnings
 from copy import deepcopy
@@ -497,7 +498,24 @@ class Tortoise:
 
         cls.table_name_generator = table_name_generator
 
-        # Mask passwords in logs output
+        if logger.isEnabledFor(logging.DEBUG):
+            str_connection_config = cls.star_password(connections_config)
+            logger.debug(
+                "Tortoise-ORM startup\n    connections: %s\n    apps: %s",
+                str_connection_config,
+                str(apps_config),
+            )
+
+        cls._init_timezone(use_tz, timezone)
+        await connections._init(connections_config, _create_db)
+        cls._init_apps(apps_config)
+        cls._init_routers(routers)
+
+        cls._inited = True
+
+    @staticmethod
+    def star_password(connections_config) -> str:
+        # Mask passwords to hide sensitive information in logs output
         passwords = []
         for name, info in connections_config.items():
             if isinstance(info, str):
@@ -512,19 +530,7 @@ class Tortoise:
                 # Show one third of the password at beginning (may be better for debugging purposes)
                 f"{password[0:len(password) // 3]}***",
             )
-
-        logger.debug(
-            "Tortoise-ORM startup\n    connections: %s\n    apps: %s",
-            str_connection_config,
-            str(apps_config),
-        )
-
-        cls._init_timezone(use_tz, timezone)
-        await connections._init(connections_config, _create_db)
-        cls._init_apps(apps_config)
-        cls._init_routers(routers)
-
-        cls._inited = True
+        return str_connection_config
 
     @classmethod
     def _init_routers(cls, routers: list[str | type] | None = None) -> None:
