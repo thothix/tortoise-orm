@@ -92,7 +92,7 @@ class BaseDBAsyncClient(abc.ABC):
     Parameters get passed as kwargs, and is mostly driver specific.
 
     .. attribute:: query_class
-        :annotation: Type[pypika.Query]
+        :annotation: Type[pypika_tortoise.Query]
 
         The PyPika Query dialect (low level dialect)
 
