@@ -11,7 +11,7 @@ if TYPE_CHECKING:  # pragma: nocoverage
 class MSSQLSchemaGenerator(BaseSchemaGenerator):
     DIALECT = "mssql"
     TABLE_CREATE_TEMPLATE = "CREATE TABLE [{table_name}] ({fields}){extra};"
-    FIELD_TEMPLATE = "[{name}] {type} {nullable} {unique}{primary}{default}"
+    FIELD_TEMPLATE = "[{name}] {type}{nullable}{unique}{primary}{default}"
     INDEX_CREATE_TEMPLATE = "CREATE INDEX [{index_name}] ON [{table_name}] ({fields});"
     GENERATED_PK_TEMPLATE = "[{field_name}] {generated_sql}"
     FK_TEMPLATE = (

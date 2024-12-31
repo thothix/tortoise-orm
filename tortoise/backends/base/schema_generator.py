@@ -22,7 +22,7 @@ if TYPE_CHECKING:  # pragma: nocoverage
 class BaseSchemaGenerator:
     DIALECT = "sql"
     TABLE_CREATE_TEMPLATE = 'CREATE TABLE {exists}"{table_name}" ({fields}){extra}{comment};'
-    FIELD_TEMPLATE = '"{name}" {type} {nullable} {unique}{primary}{default}{comment}'
+    FIELD_TEMPLATE = '"{name}" {type}{nullable}{unique}{primary}{default}{comment}'
     INDEX_CREATE_TEMPLATE = 'CREATE INDEX {exists}"{index_name}" ON "{table_name}" ({fields});'
     UNIQUE_INDEX_CREATE_TEMPLATE = INDEX_CREATE_TEMPLATE.replace(" INDEX", " UNIQUE INDEX")
     UNIQUE_CONSTRAINT_CREATE_TEMPLATE = 'CONSTRAINT "{index_name}" UNIQUE ({fields})'
@@ -251,8 +251,8 @@ class BaseSchemaGenerator:
                         )
                         continue
 
-            nullable = "NOT NULL" if not field_object.null else ""
-            unique = "UNIQUE" if field_object.unique else ""
+            nullable = " NOT NULL" if not field_object.null else ""
+            unique = " UNIQUE" if field_object.unique else ""
 
             if getattr(field_object, "reference", None):
                 reference = cast("ForeignKeyFieldInstance", field_object.reference)
