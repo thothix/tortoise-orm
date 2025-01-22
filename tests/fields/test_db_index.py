@@ -99,7 +99,10 @@ class TestIndexAliasChar(TestIndexAlias):
 
 class TestModelWithIndexes(test.TestCase):
     def test_meta(self):
-        self.assertEqual(ModelWithIndexes._meta.indexes, [Index(fields=("f1", "f2"))])
+        self.assertEqual(
+            ModelWithIndexes._meta.indexes,
+            [Index(fields=("f1", "f2")), Index(fields=("f3",), name="model_with_indexes__f3")],
+        )
         self.assertTrue(ModelWithIndexes._meta.fields_map["id"].index)
         self.assertTrue(ModelWithIndexes._meta.fields_map["indexed"].index)
         self.assertTrue(ModelWithIndexes._meta.fields_map["unique_indexed"].unique)

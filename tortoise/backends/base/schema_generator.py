@@ -4,8 +4,6 @@ import re
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, Type, cast
 
-from pypika_tortoise.context import DEFAULT_SQL_CONTEXT
-
 from tortoise.exceptions import ConfigurationError
 from tortoise.fields import JSONField, TextField, UUIDField
 from tortoise.fields.relational import OneToOneFieldInstance
@@ -348,31 +346,17 @@ class BaseSchemaGenerator:
 
         if model._meta.indexes:
             for index in model._meta.indexes:
-                if not isinstance(index, Index):
+                if isinstance(index, Index):
+                    idx_sql = index.get_sql(self, model, safe)
+                else:
                     fields = []
                     for field in index:
                         field_object = model._meta.fields_map[field]
                         fields.append(field_object.source_field or field)
+                    idx_sql = self._get_index_sql(model, fields, safe=safe)
 
-                    _indexes.append(self._get_index_sql(model, fields, safe=safe))
-                else:
-                    if index.fields:
-                        fields = [f for f in index.fields]
-                    elif index.expressions:
-                        fields = [
-                            f"({expression.get_sql(DEFAULT_SQL_CONTEXT)})"
-                            for expression in index.expressions
-                        ]
-                    else:
-                        raise ConfigurationError(
-                            "At least one field or expression is required to define an index."
-                        )
-
-                    _indexes.append(
-                        self._get_index_sql(
-                            model, fields, safe=safe, index_type=index.INDEX_TYPE, extra=index.extra
-                        )
-                    )
+                if idx_sql:
+                    _indexes.append(idx_sql)
 
         field_indexes_sqls = [val for val in list(dict.fromkeys(_indexes)) if val]
 

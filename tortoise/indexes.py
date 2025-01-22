@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, Type
 
+from pypika_tortoise.context import DEFAULT_SQL_CONTEXT
 from pypika_tortoise.terms import Term, ValueWrapper
 
 from tortoise.exceptions import ConfigurationError
+
+if TYPE_CHECKING:
+    from tortoise.backends.base.schema_generator import BaseSchemaGenerator
+    from tortoise.models import Model
 
 
 class Index:
@@ -45,6 +50,36 @@ class Index:
             "type": self.INDEX_TYPE,
             "extra": self.extra,
         }
+
+    def index_name(self, schema_generator: "BaseSchemaGenerator", model: "Type[Model]") -> str:
+        # This function is required by aerich
+        return self.name or schema_generator._generate_index_name("idx", model, self.field_names)
+
+    def get_sql(
+        self, schema_generator: "BaseSchemaGenerator", model: "Type[Model]", safe: bool
+    ) -> str:
+        # This function is required by aerich
+        return schema_generator._get_index_sql(
+            model,
+            self.field_names,
+            safe,
+            index_name=self.name,
+            index_type=self.INDEX_TYPE,
+            extra=self.extra,
+        )
+
+    @property
+    def field_names(self) -> list[str]:
+        if self.fields:
+            return list(self.fields)
+        elif self.expressions:
+            return [
+                f"({expression.get_sql(DEFAULT_SQL_CONTEXT)})" for expression in self.expressions
+            ]
+        else:
+            raise ConfigurationError(
+                "At least one field or expression is required to define an index."
+            )
 
     def __repr__(self) -> str:
         argument = ""
