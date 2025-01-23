@@ -296,17 +296,25 @@ class Field(Generic[VALUE], metaclass=_FieldMeta):
 
     def _get_dialects(self) -> dict[str, dict]:
         ret = {}
-        for dialect in [key for key in dir(self) if key.startswith("_db_")]:
-            item = {}
+        for dialect in dir(self):
+            if not dialect.startswith("_db_"):
+                continue
             cls = getattr(self, dialect)
+            d = cls.__dict__
             try:
-                cls = cls(self)
+                obj = cls(self)
             except TypeError:
                 pass
-            for key, val in cls.__dict__.items():
-                if not key.startswith("_"):
-                    item[key] = val
-            ret[dialect[4:]] = item
+            else:
+                props = {
+                    prop: getattr(obj, prop)
+                    for prop in dir(cls)
+                    if isinstance(getattr(cls, prop), property)
+                }
+                d = {**d, **props}
+
+            ret[dialect[4:]] = {k: v for k, v in d.items() if not k.startswith("_")}
+
         return ret
 
     def get_db_field_types(self) -> Optional[dict[str, str]]:

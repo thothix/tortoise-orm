@@ -109,7 +109,10 @@ class TestBasic(test.SimpleTestCase):
                         "description": "The Event NAME",
                         "docstring": "The Event NAME\nIt's pretty important",
                         "constraints": {"max_length": 255},
-                        "db_field_types": {"": "VARCHAR(255)"},
+                        "db_field_types": {
+                            "": "VARCHAR(255)",
+                            "oracle": "NVARCHAR2(255)",
+                        },
                     },
                     {
                         "name": "created_at",
@@ -252,7 +255,10 @@ class TestBasic(test.SimpleTestCase):
                         "name": "name",
                         "field_type": "CharField",
                         "db_column": "name",
-                        "db_field_types": {"": "VARCHAR(255)"},
+                        "db_field_types": {
+                            "": "VARCHAR(255)",
+                            "oracle": "NVARCHAR2(255)",
+                        },
                         "python_type": "str",
                         "generated": False,
                         "nullable": False,
