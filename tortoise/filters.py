@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import operator
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from functools import partial
-from typing import TYPE_CHECKING, Any, Optional, Sequence, TypedDict, Union
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pypika_tortoise import SqlContext, Table
 from pypika_tortoise.enums import DatePart, Matching, SqlTypes
@@ -40,7 +40,7 @@ class Like(BasicCriterion):
     def get_sql(self, ctx: SqlContext):
         sql = super().get_sql(ctx.copy(with_alias=False)) + str(self.escape)
         if ctx.with_alias and self.alias:  # pragma: nocoverage
-            return '{sql} "{alias}"'.format(sql=sql, alias=self.alias)
+            return f'{sql} "{self.alias}"'
         return sql
 
 
@@ -54,35 +54,35 @@ def escape_like(val: str) -> str:
 ##############################################################################
 
 
-def list_encoder(values: Iterable[Any], instance: "Model", field: Field) -> list:
+def list_encoder(values: Iterable[Any], instance: Model, field: Field) -> list:
     """Encodes an iterable of a given field into a database-compatible format."""
     return [field.to_db_value(element, instance) for element in values]
 
 
-def related_list_encoder(values: Iterable[Any], instance: "Model", field: Field) -> list:
+def related_list_encoder(values: Iterable[Any], instance: Model, field: Field) -> list:
     return [
         field.to_db_value(element.pk if hasattr(element, "pk") else element, instance)
         for element in values
     ]
 
 
-def bool_encoder(value: Any, instance: "Model", field: Field) -> bool:
+def bool_encoder(value: Any, instance: Model, field: Field) -> bool:
     return bool(value)
 
 
-def string_encoder(value: Any, instance: "Model", field: Field) -> str:
+def string_encoder(value: Any, instance: Model, field: Field) -> str:
     return str(value)
 
 
-def int_encoder(value: Any, instance: "Model", field: Field) -> int:
+def int_encoder(value: Any, instance: Model, field: Field) -> int:
     return int(value)
 
 
-def json_encoder(value: Any, instance: "Model", field: Field) -> dict:
+def json_encoder(value: Any, instance: Model, field: Field) -> dict:
     return value
 
 
-def array_encoder(value: Union[Any, Sequence[Any]], instance: "Model", field: Field) -> Any:
+def array_encoder(value: Any | Sequence[Any], instance: Model, field: Field) -> Any:
     # Casting to the exact type of the field to avoid issues with psycopg that tries
     # to use the smallest possible type which can lead to errors,
     # e.g. {1,2} will be casted to smallint[] instead of integer[].
@@ -238,15 +238,15 @@ def json_filter(field: Term, value: dict) -> Criterion:
     raise NotImplementedError("must be overridden in each xecutor")
 
 
-def array_contains(field: Term, value: Union[Any, Sequence[Any]]) -> Criterion:
+def array_contains(field: Term, value: Any | Sequence[Any]) -> Criterion:
     raise NotImplementedError("must be overridden in each executor")
 
 
-def array_contained_by(field: Term, value: Union[Any, Sequence[Any]]) -> Criterion:
+def array_contained_by(field: Term, value: Any | Sequence[Any]) -> Criterion:
     raise NotImplementedError("must be overridden in each executor")
 
 
-def array_overlap(field: Term, value: Union[Any, Sequence[Any]]) -> Criterion:
+def array_overlap(field: Term, value: Any | Sequence[Any]) -> Criterion:
     raise NotImplementedError("must be overridden in each executor")
 
 
@@ -462,7 +462,7 @@ def get_array_filter(
 
 
 def get_filters_for_field(
-    field_name: str, field: Optional[Field], source_field: str
+    field_name: str, field: Field | None, source_field: str
 ) -> dict[str, FilterInfoDict]:
     if field is not None:
         if isinstance(field, ManyToManyFieldInstance):
